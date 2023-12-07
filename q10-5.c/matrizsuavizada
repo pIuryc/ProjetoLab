@@ -1,0 +1,92 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+#define DIM 5
+
+//Pré-Função
+void criarMatrizAleatoria(int matriz[DIM][DIM]);
+void imprimirMatriz(int matriz[DIM][DIM]);
+void suavizarMatriz(int matriz[DIM][DIM], int matrizSuavizada[DIM][DIM], int tamanhoMascara, int divisor);
+
+int main() {
+    int matriz[DIM][DIM];
+    int matrizSuavizada[DIM][DIM];
+  
+    criarMatrizAleatoria(matriz);
+    printf("Matriz Original:\n");
+    imprimirMatriz(matriz);
+
+    suavizarMatriz(matriz, matrizSuavizada, 3, 9);
+
+    printf("Matriz Suavizada (3x3, divisor 9):\n");
+    imprimirMatriz(matrizSuavizada);
+
+    suavizarMatriz(matriz, matrizSuavizada, 5, 25);
+
+    printf("Matriz Suavizada (5x5, divisor 25):\n");
+    imprimirMatriz(matrizSuavizada);
+
+    return 0;
+}
+
+void criarMatrizAleatoria(int matriz[DIM][DIM]) {
+    srand(time(NULL));
+
+    // Números aleatórios para a matriz
+    for (int i = 0; i < DIM; i++) {
+        for (int j = 0; j < DIM; j++) {
+            matriz[i][j] = rand() % 100;
+        }
+    }
+}
+
+void imprimirMatriz(int matriz[DIM][DIM]) {
+    printf("|");
+    for (int i = 0; i < DIM; i++) {
+        for (int j = 0; j < DIM; j++) {
+            printf("%d\t", matriz[i][j]);
+        }
+        printf("|\n");
+        if (i < DIM - 1) {
+            printf("|");
+        }
+    }
+    printf("\n");
+}
+
+void suavizarMatriz(int matriz[DIM][DIM], int matrizSuavizada[DIM][DIM], int tamanhoMascara, int divisor) {
+    // Verifica se o tamanho da máscara é ímpar
+    if (tamanhoMascara % 2 == 0) {
+        printf("O tamanho da máscara deve ser ímpar.\n");
+        return;
+    }
+
+    // Calcula o raio da máscara (distância do centro até a borda)
+    int raio = tamanhoMascara / 2;
+
+    // Aplica o filtro de suavização à matriz
+    for (int i = 0; i < DIM; i++) {
+        for (int j = 0; j < DIM; j++) {
+            int soma = 0;
+            int count = 0;
+
+            // Calcula a média ponderada dos pixels vizinhos
+            for (int k = -raio; k <= raio; k++) {
+                for (int l = -raio; l <= raio; l++) {
+                    int x = i + k;
+                    int y = j + l;
+
+                    // Verifica se as coordenadas estão dentro dos limites da matriz
+                    if (x >= 0 && x < DIM && y >= 0 && y < DIM) {
+                        soma += matriz[x][y];
+                        count++;
+                    }
+                }
+            }
+
+            // Atribui o valor resultante à nova matriz suavizada
+            matrizSuavizada[i][j] = soma / divisor;
+        }
+    }
+}
