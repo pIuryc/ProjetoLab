@@ -1,0 +1,265 @@
+#include <dirent.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+// Definição da estrutura para armazenar informações da imagem PGM
+struct pgm {
+  int tipo;             // Tipo da imagem (P2 ou P5)
+  int c;                // Número de colunas
+  int r;                // Número de linhas
+  int mv;               // Valor máximo do pixel
+  unsigned char *pData; // Ponteiro para os dados da imagem
+};
+
+// Função para ler uma imagem PGM a partir de um arquivo
+void readPGMImage(struct pgm *, char *);
+
+// Função para verificar se o nome do arquivo contém "mean"
+char verificarMean(char *);
+
+// Função para calcular a matriz de coocorrência estruturada (SCM)
+void calculaSCM(int *, struct pgm *, struct pgm *, int, FILE *, char);
+
+int main(int argc, char *argv[]) {
+  // Declaração de variáveis
+  FILE *txt;
+  DIR *d, *d_mean;
+  clock_t begin, end;
+  struct pgm img, img_mean;
+  struct dirent *dir = NULL, *dir_mean = NULL;
+  int cont = 0, *scm = NULL, quantizacao;
+  double time_per_img, time_total = 0;
+  char id[50], nome_arquivo[50], mean[10] = "mean", itsmean, nome_arquivo_mean[50], type, outname[50] = "SCM-Qtz ";
+
+  // Verificação do número de argumentos de linha de comando
+  if (argc != 2) {
+    printf("\nUse:\n\t %s <quantizacao>\n\n", argv[0]);
+    exit(4);
+  }
+
+  // Conversão do argumento para inteiro
+  quantizacao = atoi(argv[1]);
+
+  // Abertura dos diretórios e verificação de erros
+  d = opendir("./oncotex_pgm");
+  if (!d) {
+    perror("Erro ao abrir o diretório");
+    exit(5);
+  }
+
+  d_mean = opendir("./oncotex_pgm");
+  if (!d_mean) {
+    perror("Erro ao abrir o diretório");
+    closedir(d);
+    exit(5);
+  }
+
+  // Reposicionamento dos ponteiros para o início dos diretórios
+  rewinddir(d);
+  rewinddir(d_mean);
+
+  // Criação do nome do arquivo de saída com base na quantização
+  snprintf(outname, sizeof(outname), "SCM-Qtz %d.txt", quantizacao);
+
+  // Abertura do arquivo de saída e verificação de erros
+  txt = fopen(outname, "w");
+  if (!txt) {
+    perror("Erro ao abrir o arquivo txt.");
+    closedir(d);
+    closedir(d_mean);
+    exit(6);
+  }
+
+  // Loop sobre os arquivos no diretório
+  if (d) {
+    for (int i = 0; (dir = readdir(d)) != NULL; i++) {
+      begin = clock();
+      cont += 1;
+
+      // Ignora os primeiros três itens (., ..)
+      if (i < 3) {
+        continue;
+      }
+
+      // Obtém informações sobre o arquivo
+      type = dir->d_name[0];
+      strncpy(id, dir->d_name + 2, 5);
+      strcpy(nome_arquivo, dir->d_name);
+      itsmean = verificarMean(nome_arquivo);
+
+      // Se não for um arquivo "mean", procura o correspondente
+      if (itsmean == 'n') {
+        for (int x = 0; (dir_mean = readdir(d_mean)) != NULL; x++) {
+          if (x >= 2 && strstr(dir_mean->d_name, id) != NULL && strstr(dir_mean->d_name, mean) != NULL) {
+            strcpy(nome_arquivo_mean, dir_mean->d_name);
+          }
+        }
+        rewinddir(d_mean);
+      } else {
+        continue;
+      }
+
+      // Lê as imagens PGM
+      readPGMImage(&img, nome_arquivo);
+      readPGMImage(&img_mean, nome_arquivo_mean);
+
+      // Aloca memória para a matriz de coocorrência estruturada (SCM)
+      scm = malloc(quantizacao * quantizacao * sizeof(int));
+      if (!scm) {
+        perror("Erro ao alocar memória para scm");
+        fclose(txt);
+        closedir(d);
+        closedir(d_mean);
+        exit(7);
+      }
+
+      // Calcula e escreve a SCM no arquivo de saída
+      calculaSCM(scm, &img, &img_mean, quantizacao, txt, type);
+
+      end = clock();
+      time_per_img = (double)(end - begin) / CLOCKS_PER_SEC;
+      time_total += time_per_img;
+    }
+
+    // Fecha os diretórios e o arquivo de saída
+    closedir(d);
+    fclose(txt);
+  }
+
+  // Calcula e exibe o tempo médio e total
+  cont -= 3; // cont fica com o total de arquivos armazenado
+  printf("Tempo médio: %lf\n", time_total / cont);
+  printf("Tempo Total: %lf\n", time_total);
+  // Libera a memória alocada para scm
+  free(scm);
+  return 0;
+}
+
+// Função para ler uma imagem PGM a partir de um arquivo
+void readPGMImage(struct pgm *pio, char *filename) {
+  FILE *fp;
+  char ch;
+  char diretorio[100] = "oncotex_pgm/";
+
+  // Concatenar diretório e nome do arquivo corretamente
+  char filepath[150];
+  strcpy(filepath, diretorio);
+  strcat(filepath, filename);
+
+  // Abre o arquivo e verifica erros
+  if (!(fp = fopen(filepath, "r"))) {
+    perror("Erro ao abrir o arquivo.");
+    exit(1);
+  }
+
+  // Verifica se a imagem está no formato PGM
+  if ((ch = getc(fp)) != 'P') {
+    puts("A imagem fornecida não está no formato pgm");
+    exit(2);
+  }
+
+  // Lê o tipo da imagem (P2 ou P5)
+  pio->tipo = getc(fp) - '0';
+
+  fseek(fp, 1, SEEK_CUR);
+
+  // Ignora comentários
+  while ((ch = getc(fp)) == '#') {
+    while ((ch = getc(fp)) != '\n') {
+      fseek(fp, 1, SEEK_CUR);
+    }
+  }
+
+  fseek(fp, -2, SEEK_CUR);
+  fscanf(fp, "%d %d", &pio->c, &pio->r);
+
+  // Verifica erros
+  if (ferror(fp)) {
+    perror(NULL);
+    exit(3);
+  }
+
+  fscanf(fp, "%d", &pio->mv);
+  fseek(fp, 0, SEEK_CUR);
+
+  // Aloca memória para os dados da imagem
+  pio->pData = (unsigned char *)malloc(pio->r * pio->c * sizeof(unsigned char));
+
+  // Lê os dados da imagem com base no tipo (P2 ou P5)
+  switch (pio->tipo) {
+  case 2:
+    puts("Lendo imagem PGM (dados em texto)");
+    for (int k = 0; k < (pio->r * pio->c); k++) {
+      fscanf(fp, "%hhu", pio->pData + k);
+    }
+    break;
+  case 5:
+    //puts("Lendo imagem PGM (dados em binário)");
+    fread(pio->pData, sizeof(unsigned char), pio->r * pio->c, fp);
+    break;
+  default:
+    puts("Tipo de imagem não suportado.");
+    exit(4);
+  }
+
+  // Fecha o arquivo
+  fclose(fp);
+}
+
+// Função para verificar se o nome do arquivo contém "mean"
+char verificarMean(char *nome_arquivo) {
+  char mean[50] = "mean";
+
+  if (strstr(nome_arquivo, mean) != NULL) {
+    return 's';
+  } else {
+    return 'n';
+  }
+}
+
+// Função para calcular a matriz de coocorrência estruturada (SCM)
+void calculaSCM(int *scm, struct pgm *pioA, struct pgm *pioB, int quant, FILE *pf, char tipo) {
+  int linha = pioA->r, coluna = pioA->c;
+  unsigned char *pdataA = pioA->pData, *pdataB = pioB->pData;
+  int *matrizA = malloc(sizeof(int) * linha * coluna);
+  int *matrizB = malloc(sizeof(int) * linha * coluna);
+  int divisao = 256 / quant;
+
+  // Preenche as matrizes com os valores normalizados
+  for (int i = 0; i < linha; i++) {
+    for (int x = 0; x < coluna; x++) {
+      *(matrizA + i * coluna + x) = (int)(*(pdataA + i * coluna + x) / divisao);
+      *(matrizB + i * coluna + x) = (int)(*(pdataB + i * coluna + x) / divisao);
+    }
+  }
+
+  // Inicializa a matriz SCM com zeros
+  for (int i = 0; i < quant; i++) {
+    for (int x = 0; x < quant; x++) {
+      *(scm + i * quant + x) = 0;
+    }
+  }
+
+  // Preenche a matriz SCM contando as ocorrências
+  for (int i = 0; i < linha; i++) {
+    for (int x = 0; x < coluna; x++) {
+      *(scm + *(matrizA + i * coluna + x) * quant + *(matrizB + i * coluna + x)) += 1;
+    }
+  }
+
+  // Escreve a matriz SCM no arquivo de saída
+  for (int i = 0; i < quant; i++) {
+    for (int x = 0; x < quant; x++) {
+      fprintf(pf, "%d, ", *(scm + i * quant + x));
+    }
+  }
+
+  // Escreve o tipo no final da linha no arquivo de saída
+  fprintf(pf, "%c \n", tipo);
+
+  // Libera a memória alocada para as matrizes
+  free(matrizA);
+  free(matrizB);
+}
